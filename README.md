@@ -1,55 +1,45 @@
 # Addict Editor
 
-A save-file editor for the game **Schedule I**, built in **Rust** with the **Slint** UI toolkit.
-It targets the modern `0.4.5f2` save format and is inspired by the older
-[Schedule-1-Save-File-Editor](https://github.com/N0edL/Schedule-1-Save-File-Editor) (Python/PySide6),
-re-implemented for the current save layout.
+A fast save-file editor for **Schedule I** (`0.4.5f2` format), built in **Rust** + **Slint**.
 
 ## Features
 
-- **Save selection** - auto-detects saves under `%USERPROFILE%\AppData\LocalLow\TVGS\Schedule I\saves\<steamid>\SaveGame_N`, or browse to any folder.
-- **Money** - online balance, net worth, lifetime earnings, weekly deposit sum, and on-hand player cash.
-- **Rank** - presets (`Street Rat 1` .. `Baron 5`) with correct cumulative XP, manual rank/tier/XP, or max to 999.
-- **Products** - discover base products, generate custom products (with prices and mix recipes), delete generated.
-- **Properties / Businesses** - own everything, bulk-fill storage slots with quantity/quality/packaging.
-- **Unlocks** - rank 999, all map regions, and one-click "unlock everything".
-- **Inventory** - set dealer cash and player cash.
-- **NPCs** - max all relationships, recruit dealers, add missing NPCs from bundled templates.
-- **Quests** - complete all quests and objectives.
-- **Variables** - flip `False` flags to `True` and max numeric counters.
-- **Misc** - organisation name, console setting, appearance presets.
-- **Saves** - generate a new save, import an external save folder, delete saves.
-- **Backups** - an initial full backup plus per-feature timestamped snapshots; revert a feature or revert everything.
-- **Themes** - Dark, Light, Dracula, Solarized.
-- **Mods** - detects the game install and MelonLoader status; links to the official installer (no auto-downloads).
+Staged editing: changes are queued and only written when you hit **Apply** (or thrown away with **Discard**). Loading a save makes a full backup first.
+
+| Tab | What you can do |
+|-----|-----------------|
+| **Save** | Auto-detect saves (`…\TVGS\Schedule I\saves\<steamid>\SaveGame_N`) or browse to a folder |
+| **Money** | Online balance, net worth, lifetime earnings, weekly deposit, player cash |
+| **Rank** | Presets (`Street Rat 1`–`Baron 5`), manual rank/tier/XP, per-region toggles |
+| **Products** | Discover base products, generate custom ones, delete generated |
+| **Properties / Businesses** | Per-item ownership toggles, bulk-fill storage (qty/quality/packaging) |
+| **Inventory** | Set dealer cash and player cash |
+| **NPCs** | Set relationship value, recruit dealers, add missing NPCs |
+| **Quests** | Complete all quests and objectives |
+| **Misc** | Organisation name, console setting, appearance presets |
+| **Backups** | Revert a single feature or restore the whole save |
+| **Themes** | Dark, Light, Dracula, Solarized |
+
+Numeric inputs are capped to the maximum the game accepts. The sidebar collapses to icons.
 
 ## Safety
 
-- Every edit first writes a backup. The first edit also snapshots the whole save folder (`<SaveName>_AddictBackups\initial`).
-- Files are written back with the game's 4-space indentation, and unknown fields are preserved (round-trip safe via `serde_json` with `preserve_order`).
-- The editor never auto-downloads or modifies your game installation.
+- Every write is backed up; the first load snapshots the whole save to `<SaveName>_AddictBackups\initial`.
+- Output keeps the game's 4-space indentation and preserves unknown fields (round-trip safe).
+- Never touches or downloads anything to your game install.
 
-## Build & run
-
-```bash
-cargo run --release
-```
-
-## Test
-
-Integration tests run every operation against a throwaway copy of `reference material/SaveGame_1`:
+## Build, run & test
 
 ```bash
-cargo test
+cargo run --release   # launch
+cargo test            # run integration tests against a copy of reference material/SaveGame_1
 ```
 
-## Project layout
+## Layout
 
-- `ui/` - Slint UI (`app.slint`, `theme.slint`, `widgets.slint`).
-- `src/save/` - save IO and per-feature logic (`manager`, `paths`, `backup`, `money`, `rank`, `products`, `properties`, `npcs`, `quests`, `variables`, `inventory`, `appearance`, `misc`, `generate`, `mods`, `templates`).
-- `src/bridge.rs` - conversions between the save layer and Slint models.
-- `src/main.rs` - window setup and callback wiring.
+- `ui/` — Slint UI (`app.slint`, `theme.slint`, `widgets.slint`)
+- `src/save/` — save IO + per-feature logic (`manager`, `paths`, `backup`, `money`, `rank`, `products`, `properties`, `npcs`, `quests`, `inventory`, `appearance`, `misc`, `templates`)
+- `src/bridge.rs` — Rust ↔ Slint model conversions
+- `src/main.rs` — window setup, staging model, callback wiring
 
-## Disclaimer
-
-Use at your own risk. Always keep your own backups of important saves.
+Inspired by [Schedule-1-Save-File-Editor](https://github.com/N0edL/Schedule-1-Save-File-Editor). Use at your own risk — keep your own backups.
