@@ -1,0 +1,27 @@
+[package]
+name = "addict-editor"
+version = "0.1.0"
+edition = "2021"
+description = "Addict Editor - a Schedule I save file editor"
+build = "build.rs"
+
+[dependencies]
+slint = "1.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+rfd = "0.15"
+dirs = "5"
+chrono = "0.4"
+walkdir = "2"
+anyhow = "1"
+thiserror = "1"
+include_dir = "0.7"
+rand = "0.8"
+
+[build-dependencies]
+slint-build = "1.8"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1

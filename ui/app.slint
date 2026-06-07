@@ -1,0 +1,732 @@
+import { Theme } from "theme.slint";
+import { Card, SectionTitle, Hint, ActionButton, GhostButton, Field, IconButton, NumberField } from "widgets.slint";
+import { LineEdit, ComboBox, CheckBox, ScrollView, SpinBox } from "std-widgets.slint";
+
+export struct SaveEntry {
+    name: string,
+    path: string,
+    org: string,
+    version: string,
+    played: string,
+}
+
+export struct BackupItem {
+    feature: string,
+    timestamp: string,
+    label: string,
+}
+
+export struct ToggleRow {
+    name: string,
+    owned: bool,
+}
+
+export struct RegionRow {
+    index: int,
+    name: string,
+    unlocked: bool,
+}
+
+component TabHeader inherits VerticalLayout {
+    in property <string> title;
+    in property <string> subtitle;
+    spacing: 2px;
+    SectionTitle { text: root.title; font-size: 20px; }
+    Hint { text: root.subtitle; }
+}
+
+component InfoRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    height: 24px;
+    Text { text: root.label; color: Theme.text-dim; font-size: 13px; width: 160px; }
+    Text { text: root.value; color: Theme.text; font-size: 13px; font-weight: 600; }
+}
+
+// A single navigation entry in the sidebar.
+component NavItem inherits GhostButton {
+    in property <int> index;
+    in-out property <int> current;
+    active: current == index;
+    clicked => { current = index; }
+}
+
+// One save card on the landing page.
+component SaveCard inherits Rectangle {
+    in property <string> org;
+    in property <string> name;
+    in property <string> path;
+    in property <string> version;
+    in property <string> played;
+    in property <bool> selected: false;
+    callback load();
+
+    height: 88px;
+    border-radius: Theme.radius;
+    border-width: selected ? 2px : 1px;
+    border-color: selected ? Theme.accent : Theme.border;
+    background: touch.has-hover ? Theme.panel-alt : Theme.panel;
+    animate background, border-color { duration: 140ms; easing: ease-out; }
+
+    touch := TouchArea {
+        clicked => { root.load(); }
+    }
+
+    HorizontalLayout {
+        padding: 16px;
+        spacing: 14px;
+
+        Rectangle {
+            width: 46px;
+            height: 46px;
+            y: parent.height / 2 - 23px;
+            border-radius: 10px;
+            background: Theme.accent;
+            Text {
+                text: "◆";
+                color: Theme.accent-text;
+                font-size: 20px;
+                font-weight: 800;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            Text { text: root.org; color: Theme.text; font-size: 16px; font-weight: 700; overflow: elide; }
+            Text { text: root.name + "   •   v" + root.version + "   •   " + root.played; color: Theme.text-dim; font-size: 12px; overflow: elide; }
+            Text { text: root.path; color: Theme.text-dim; font-size: 10px; overflow: elide; }
+        }
+
+        ActionButton {
+            text: "Open";
+            width: 92px;
+            clicked => { root.load(); }
+        }
+    }
+}
+
+// The save selection / info screen, reused as the initial page and the Save tab.
+component SavePicker inherits VerticalLayout {
+    in property <[SaveEntry]> saves;
+    in property <string> current_path;
+    in property <bool> loaded;
+    in property <string> info_version;
+    in property <string> info_created;
+    in property <string> info_org;
+    in property <string> info_online_money;
+    in property <string> info_networth;
+    in property <string> info_rank;
+    callback detect();
+    callback browse();
+    callback load(string);
+
+    spacing: Theme.gap;
+
+    HorizontalLayout {
+        alignment: space-between;
+        VerticalLayout {
+            spacing: 2px;
+            SectionTitle { text: "Your Saves"; font-size: 24px; }
+            Hint { text: "Choose a save to edit, or load one from disk."; }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 10px;
+            ActionButton { text: "Auto-detect"; width: 120px; clicked => { root.detect(); } }
+            ActionButton { text: "Browse..."; width: 110px; clicked => { root.browse(); } }
+        }
+    }
+
+    if root.saves.length == 0: Card {
+        height: 120px;
+        VerticalLayout {
+            alignment: center;
+            Hint { text: "No saves found. Use Auto-detect or Browse to locate a SaveGame folder."; }
+        }
+    }
+
+    for entry in root.saves: SaveCard {
+        org: entry.org;
+        name: entry.name;
+        path: entry.path;
+        version: entry.version;
+        played: entry.played;
+        selected: entry.path == root.current_path;
+        load => { root.load(entry.path); }
+    }
+
+    if root.loaded: Card {
+        VerticalLayout {
+            padding: 16px;
+            spacing: 6px;
+            SectionTitle { text: "Loaded save"; }
+            InfoRow { label: "Game version"; value: root.info_version; }
+            InfoRow { label: "Created"; value: root.info_created; }
+            InfoRow { label: "Organisation"; value: root.info_org; }
+            InfoRow { label: "Online money"; value: root.info_online_money; }
+            InfoRow { label: "Net worth"; value: root.info_networth; }
+            InfoRow { label: "Rank"; value: root.info_rank; }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Addict Editor";
+    min-width: 1040px;
+    min-height: 680px;
+    preferred-width: 1180px;
+    preferred-height: 760px;
+    background: Theme.bg;
+    animate background { duration: 200ms; easing: ease-out; }
+
+    // ---- General state ----
+    in property <string> status_message: "Select a save to begin.";
+    in property <bool> status_error: false;
+    in property <bool> save_loaded: false;
+    in property <string> current_save_path;
+    in-out property <int> active_tab: 0;
+    in-out property <bool> sidebar_collapsed: false;
+
+    // ---- Pending changes ----
+    in property <int> pending_count: 0;
+    callback apply_changes();
+    callback discard_changes();
+
+    // ---- Save selection / info ----
+    in property <[SaveEntry]> available_saves: [];
+    in property <string> info_version: "-";
+    in property <string> info_created: "-";
+    in property <string> info_org: "-";
+    in property <string> info_online_money: "-";
+    in property <string> info_networth: "-";
+    in property <string> info_rank: "-";
+    callback detect_saves();
+    callback browse_save();
+    callback load_save(string);
+
+    // ---- Money ----
+    in-out property <string> money_online;
+    in-out property <string> money_networth;
+    in-out property <string> money_lifetime;
+    in-out property <string> money_weekly;
+    in-out property <string> money_cash;
+    callback stage_money();
+
+    // ---- Rank ----
+    in property <[string]> rank_presets: [];
+    in-out property <int> rank_preset_index: 0;
+    in-out property <int> rank_int: 0;
+    in-out property <int> tier_int: 1;
+    in-out property <int> xp_int: 0;
+    in property <[RegionRow]> regions: [];
+    callback stage_rank_preset();
+    callback stage_rank();
+    callback stage_region(int, bool);
+
+    // ---- Products ----
+    in-out property <int> product_count: 10;
+    in-out property <int> product_price: 5000;
+    in-out property <int> product_id_length: 8;
+    in-out property <bool> product_list_them: true;
+    callback stage_discover();
+    callback stage_generate();
+    callback stage_delete_generated();
+
+    // ---- Properties / Businesses ----
+    in property <[ToggleRow]> properties_list: [];
+    in property <[ToggleRow]> businesses_list: [];
+    callback stage_property_owned(string, bool);
+    callback stage_business_owned(string, bool);
+    in property <[string]> quality_options: [];
+    in-out property <int> quality_index: 2;
+    in property <[string]> packaging_options: [];
+    in-out property <int> packaging_index: 0;
+    in property <[string]> fill_type_options: [];
+    in-out property <int> fill_type_index: 0;
+    in-out property <int> fill_quantity: 20;
+    callback stage_fill();
+
+    // ---- Inventory ----
+    in-out property <string> dealer_cash_value: "10000";
+    callback stage_dealer_cash();
+
+    // ---- NPCs ----
+    in-out property <int> relationship_value: 999;
+    callback stage_relationships();
+    callback stage_recruit_dealers();
+    callback stage_add_missing();
+
+    // ---- Quests ----
+    callback stage_complete_quests();
+
+    // ---- Misc ----
+    in-out property <string> org_name;
+    callback stage_org();
+    in-out property <bool> console_enabled: false;
+    callback stage_console();
+    in property <[string]> appearance_presets: [];
+    in-out property <int> appearance_index: 0;
+    callback stage_appearance();
+
+    // ---- Backups ----
+    in property <[BackupItem]> backups: [];
+    callback refresh_backups();
+    callback revert_backup(string, string);
+    callback revert_all();
+    callback delete_backups();
+
+    // ---- Themes ----
+    in property <[string]> theme_names: [];
+
+    // ===================== Initial page: save selection only =====================
+    if !root.save_loaded: Rectangle {
+        background: Theme.bg;
+        ScrollView {
+            HorizontalLayout {
+                alignment: center;
+                VerticalLayout {
+                    alignment: start;
+                    padding: 40px;
+                    Rectangle {
+                        width: 760px;
+                        VerticalLayout {
+                            SavePicker {
+                                saves: root.available_saves;
+                                current_path: root.current_save_path;
+                                loaded: root.save_loaded;
+                                detect => { root.detect_saves(); }
+                                browse => { root.browse_save(); }
+                                load(p) => { root.load_save(p); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ===================== Editor: sidebar + tabs (after a save loads) =====================
+    if root.save_loaded: HorizontalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // ===================== Sidebar =====================
+        Rectangle {
+            width: root.sidebar_collapsed ? 66px : 208px;
+            background: Theme.panel;
+            animate width, background { duration: 200ms; easing: ease-in-out; }
+
+            VerticalLayout {
+                padding: 12px;
+                padding-top: 14px;
+                spacing: 4px;
+
+                HorizontalLayout {
+                    alignment: start;
+                    IconButton {
+                        glyph: root.sidebar_collapsed ? "»" : "«";
+                        clicked => { root.sidebar_collapsed = !root.sidebar_collapsed; }
+                    }
+                }
+                Rectangle { height: 6px; }
+
+                ScrollView {
+                    VerticalLayout {
+                        spacing: 2px;
+                        NavItem { text: "Save"; icon: "💾"; collapsed: root.sidebar_collapsed; index: 0; current <=> root.active_tab; }
+                        NavItem { text: "Money"; icon: "💵"; collapsed: root.sidebar_collapsed; index: 1; current <=> root.active_tab; }
+                        NavItem { text: "Rank"; icon: "⭐"; collapsed: root.sidebar_collapsed; index: 2; current <=> root.active_tab; }
+                        NavItem { text: "Products"; icon: "🧪"; collapsed: root.sidebar_collapsed; index: 3; current <=> root.active_tab; }
+                        NavItem { text: "Properties"; icon: "🏠"; collapsed: root.sidebar_collapsed; index: 4; current <=> root.active_tab; }
+                        NavItem { text: "Businesses"; icon: "🏢"; collapsed: root.sidebar_collapsed; index: 5; current <=> root.active_tab; }
+                        NavItem { text: "Inventory"; icon: "🎒"; collapsed: root.sidebar_collapsed; index: 6; current <=> root.active_tab; }
+                        NavItem { text: "NPCs"; icon: "👤"; collapsed: root.sidebar_collapsed; index: 7; current <=> root.active_tab; }
+                        NavItem { text: "Quests"; icon: "📜"; collapsed: root.sidebar_collapsed; index: 8; current <=> root.active_tab; }
+                        NavItem { text: "Misc"; icon: "⚙️"; collapsed: root.sidebar_collapsed; index: 9; current <=> root.active_tab; }
+                        NavItem { text: "Backups"; icon: "💿"; collapsed: root.sidebar_collapsed; index: 10; current <=> root.active_tab; }
+                        NavItem { text: "Themes"; icon: "🎨"; collapsed: root.sidebar_collapsed; index: 11; current <=> root.active_tab; }
+                    }
+                }
+            }
+        }
+
+        // ===================== Main area =====================
+        VerticalLayout {
+            padding: 0px;
+            spacing: 0px;
+
+            // Status bar
+            Rectangle {
+                height: 44px;
+                background: Theme.panel-alt;
+                animate background { duration: 200ms; easing: ease-out; }
+                HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    spacing: 10px;
+                    Rectangle {
+                        width: 9px; height: 9px;
+                        border-radius: 5px;
+                        y: parent.height / 2 - 4px;
+                        background: root.status_error ? Theme.danger : (root.save_loaded ? Theme.success : Theme.text-dim);
+                        animate background { duration: 200ms; easing: ease-out; }
+                    }
+                    Text {
+                        text: root.status_message;
+                        color: root.status_error ? Theme.danger : Theme.text;
+                        vertical-alignment: center;
+                        font-size: 13px;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.current_save_path;
+                        color: Theme.text-dim;
+                        vertical-alignment: center;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            ScrollView {
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: Theme.gap;
+                    alignment: start;
+
+                    // ----------------- Save (switch / info) -----------------
+                    if root.active-tab == 0: SavePicker {
+                        saves: root.available_saves;
+                        current_path: root.current_save_path;
+                        loaded: root.save_loaded;
+                        info_version: root.info_version;
+                        info_created: root.info_created;
+                        info_org: root.info_org;
+                        info_online_money: root.info_online_money;
+                        info_networth: root.info_networth;
+                        info_rank: root.info_rank;
+                        detect => { root.detect_saves(); }
+                        browse => { root.browse_save(); }
+                        load(p) => { root.load_save(p); }
+                    }
+
+                    // ----------------- Money -----------------
+                    if root.active-tab == 1: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Money"; subtitle: "Edit bank balances and on-hand cash (max 999,999,999)."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                Field { label: "Online balance"; text <=> root.money_online; edited => { root.stage_money(); } }
+                                Field { label: "Net worth"; text <=> root.money_networth; edited => { root.stage_money(); } }
+                                Field { label: "Lifetime earnings"; text <=> root.money_lifetime; edited => { root.stage_money(); } }
+                                Field { label: "Weekly deposit sum"; text <=> root.money_weekly; edited => { root.stage_money(); } }
+                                Field { label: "Player cash on hand"; text <=> root.money_cash; edited => { root.stage_money(); } }
+                                Hint { text: "Edits are staged. Use Apply changes at the bottom to write them."; }
+                            }
+                        }
+                    }
+
+                    // ----------------- Rank -----------------
+                    if root.active-tab == 2: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Rank"; subtitle: "Set rank precisely. Values are capped at the maximum the game uses."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Quick preset"; }
+                                ComboBox { model: root.rank_presets; current-index <=> root.rank_preset_index; }
+                                ActionButton { text: "Stage preset"; width: 150px; enabled: root.save_loaded; clicked => { root.stage_rank_preset(); } }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Manual values"; }
+                                NumberField { label: "Rank (0-999)"; minimum: 0; maximum: 999; value <=> root.rank_int; edited => { root.stage_rank(); } }
+                                NumberField { label: "Tier (0-999)"; minimum: 0; maximum: 999; value <=> root.tier_int; edited => { root.stage_rank(); } }
+                                NumberField { label: "XP within tier (0-100000)"; minimum: 0; maximum: 100000; value <=> root.xp_int; edited => { root.stage_rank(); } }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 8px;
+                                SectionTitle { text: "Map regions"; }
+                                Hint { text: "Toggle individual regions on or off."; }
+                                for r in root.regions: CheckBox {
+                                    text: r.name;
+                                    checked: r.unlocked;
+                                    toggled => { root.stage_region(r.index, self.checked); }
+                                }
+                            }
+                        }
+                    }
+
+                    // ----------------- Products -----------------
+                    if root.active-tab == 3: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Products"; subtitle: "Discover products and generate custom ones."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Discovery"; }
+                                Hint { text: "Marks cocaine, meth and base weed strains as discovered."; }
+                                ActionButton { text: "Discover base products"; width: 200px; enabled: root.save_loaded; clicked => { root.stage_discover(); } }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Generate custom products"; }
+                                NumberField { label: "Count (1-500)"; minimum: 1; maximum: 500; value <=> root.product_count; }
+                                NumberField { label: "Price (0-999999)"; minimum: 0; maximum: 999999; value <=> root.product_price; }
+                                NumberField { label: "ID length (4-24)"; minimum: 4; maximum: 24; value <=> root.product_id_length; }
+                                CheckBox { text: "Add to listed products"; checked <=> root.product_list_them; }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    ActionButton { text: "Stage generation"; width: 150px; enabled: root.save_loaded; clicked => { root.stage_generate(); } }
+                                    ActionButton { text: "Delete generated"; width: 160px; danger: true; enabled: root.save_loaded; clicked => { root.stage_delete_generated(); } }
+                                }
+                            }
+                        }
+                    }
+
+                    // ----------------- Properties -----------------
+                    if root.active-tab == 4: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Properties"; subtitle: "Toggle ownership per property and bulk-fill storage."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 8px;
+                                SectionTitle { text: "Ownership"; }
+                                if root.properties_list.length == 0: Hint { text: "Load a save to manage properties."; }
+                                for p in root.properties_list: HorizontalLayout {
+                                    height: 32px;
+                                    spacing: 10px;
+                                    Text { text: p.name; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    CheckBox { text: p.owned ? "Owned" : "Locked"; checked: p.owned; toggled => { root.stage_property_owned(p.name, self.checked); } }
+                                }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Bulk-fill storage"; }
+                                Hint { text: "Sets quantity / quality / packaging on every filled storage slot inside properties."; }
+                                NumberField { label: "Quantity (0-999)"; minimum: 0; maximum: 999; value <=> root.fill_quantity; }
+                                Text { text: "Affect"; color: Theme.text-dim; font-size: 12px; }
+                                ComboBox { model: root.fill_type_options; current-index <=> root.fill_type_index; }
+                                Text { text: "Quality"; color: Theme.text-dim; font-size: 12px; }
+                                ComboBox { model: root.quality_options; current-index <=> root.quality_index; }
+                                Text { text: "Packaging"; color: Theme.text-dim; font-size: 12px; }
+                                ComboBox { model: root.packaging_options; current-index <=> root.packaging_index; }
+                                ActionButton { text: "Stage fill"; width: 150px; enabled: root.save_loaded; clicked => { root.stage_fill(); } }
+                            }
+                        }
+                    }
+
+                    // ----------------- Businesses -----------------
+                    if root.active-tab == 5: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Businesses"; subtitle: "Toggle ownership per business."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 8px;
+                                SectionTitle { text: "Ownership"; }
+                                if root.businesses_list.length == 0: Hint { text: "Load a save to manage businesses."; }
+                                for b in root.businesses_list: HorizontalLayout {
+                                    height: 32px;
+                                    spacing: 10px;
+                                    Text { text: b.name; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    CheckBox { text: b.owned ? "Owned" : "Locked"; checked: b.owned; toggled => { root.stage_business_owned(b.name, self.checked); } }
+                                }
+                            }
+                        }
+                    }
+
+                    // ----------------- Inventory -----------------
+                    if root.active-tab == 6: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Inventory"; subtitle: "Cash adjustments for the player and dealers."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                Field { label: "Set all dealer cash to"; text <=> root.dealer_cash_value; edited => { root.stage_dealer_cash(); } }
+                                Field { label: "Player cash on hand"; text <=> root.money_cash; edited => { root.stage_money(); } }
+                                Hint { text: "Edits are staged. Use Apply changes at the bottom to write them."; }
+                            }
+                        }
+                    }
+
+                    // ----------------- NPCs -----------------
+                    if root.active-tab == 7: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "NPCs"; subtitle: "Relationships and dealers."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Relationships"; }
+                                NumberField { label: "Relationship value (0-999)"; minimum: 0; maximum: 999; value <=> root.relationship_value; edited => { root.stage_relationships(); } }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Dealers & roster"; }
+                                ActionButton { text: "Recruit all dealers"; width: 180px; enabled: root.save_loaded; clicked => { root.stage_recruit_dealers(); } }
+                                ActionButton { text: "Add missing NPCs"; width: 180px; enabled: root.save_loaded; clicked => { root.stage_add_missing(); } }
+                            }
+                        }
+                    }
+
+                    // ----------------- Quests -----------------
+                    if root.active-tab == 8: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Quests"; subtitle: "Complete all quests and objectives."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                ActionButton { text: "Complete all quests"; width: 200px; enabled: root.save_loaded; clicked => { root.stage_complete_quests(); } }
+                            }
+                        }
+                    }
+
+                    // ----------------- Misc -----------------
+                    if root.active-tab == 9: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Misc"; subtitle: "Organisation, settings and appearance."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Organisation"; }
+                                Field { label: "Organisation name"; text <=> root.org_name; edited => { root.stage_org(); } }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Game settings"; }
+                                CheckBox { text: "Console enabled"; checked <=> root.console_enabled; toggled => { root.stage_console(); } }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                SectionTitle { text: "Appearance preset"; }
+                                ComboBox { model: root.appearance_presets; current-index <=> root.appearance_index; selected => { root.stage_appearance(); } }
+                            }
+                        }
+                    }
+
+                    // ----------------- Backups -----------------
+                    if root.active-tab == 10: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Backups"; subtitle: "Every change is backed up automatically. Restore here."; }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            ActionButton { text: "Refresh"; width: 110px; clicked => { root.refresh_backups(); } }
+                            ActionButton { text: "Revert ALL to initial"; width: 190px; danger: true; enabled: root.save_loaded; clicked => { root.revert_all(); } }
+                            ActionButton { text: "Delete all backups"; width: 170px; danger: true; clicked => { root.delete_backups(); } }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 8px;
+                                SectionTitle { text: "Feature backups"; }
+                                if root.backups.length == 0: Hint { text: "No feature backups yet."; }
+                                for b in root.backups: Rectangle {
+                                    height: 46px;
+                                    border-radius: Theme.radius;
+                                    background: Theme.panel-alt;
+                                    HorizontalLayout {
+                                        padding-left: 14px;
+                                        padding-right: 14px;
+                                        spacing: 10px;
+                                        Text { text: b.label; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                        ActionButton {
+                                            text: "Revert";
+                                            width: 90px;
+                                            clicked => { root.revert_backup(b.feature, b.timestamp); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ----------------- Themes -----------------
+                    if root.active-tab == 11: VerticalLayout {
+                        spacing: Theme.gap;
+                        TabHeader { title: "Themes"; subtitle: "Pick a color scheme."; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 10px;
+                                for name[idx] in root.theme_names: GhostButton {
+                                    text: name;
+                                    active: Theme.mode == idx;
+                                    clicked => { Theme.mode = idx; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ===================== Pending changes bar =====================
+            Rectangle {
+                height: root.pending_count > 0 ? 60px : 0px;
+                clip: true;
+                background: Theme.panel-alt;
+                animate height { duration: 180ms; easing: ease-in-out; }
+
+                Rectangle {
+                    y: 0;
+                    height: 1px;
+                    width: parent.width;
+                    background: Theme.border;
+                }
+
+                HorizontalLayout {
+                    padding: 13px;
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    spacing: 12px;
+                    Text {
+                        text: root.pending_count == 1
+                            ? "1 unsaved change"
+                            : (root.pending_count + " unsaved changes");
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        font-size: 13px;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                    }
+                    ActionButton { text: "Discard"; danger: true; width: 110px; clicked => { root.discard_changes(); } }
+                    ActionButton { text: "Apply changes"; width: 170px; clicked => { root.apply_changes(); } }
+                }
+            }
+        }
+    }
+}

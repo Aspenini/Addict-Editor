@@ -1,0 +1,20 @@
+# Rust / Cargo build output
+/target/
+**/*.rs.bk
+*.pdb
+
+# Backups created by Addict Editor next to saves
+*_AddictBackups/
+
+# Editor / IDE
+/.idea/
+/.vscode/
+*.iml
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# reference material
+reference material/
